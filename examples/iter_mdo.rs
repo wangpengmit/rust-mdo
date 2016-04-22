@@ -21,7 +21,7 @@ fn main() {
                            bind(if x * x + y * y == z * z { ret(()) }
                                 else { mzero() },
                                 move |_|
-                                ret((x+2, y, z))
+                                ret((x+y, y, z))
                                 )))).collect::<Vec<_>>();
     println!("{:?}", l);
 
@@ -31,7 +31,7 @@ fn main() {
         x <- 1..z;
         y <- x..z;
         when x * x + y * y == z * z;
-        ret ((x+2, y, z))
+        ret ((x+y, y, z))
     }.collect::<Vec<_>>();
     println!("{:?}", l);
 }

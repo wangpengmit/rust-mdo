@@ -13,11 +13,17 @@
 /// Monadic do notation using duck typing
 ///
 /// Syntax:
-/// `(instr)* ; ret expr`
+/// `(instr)*`
 ///
 /// instr can be:
 ///
-/// * `pattern <- expression`: bind expression to pattern. a `bind`
+/// * `identifier <- expression`: bind expression to identifier. a `bind`
+///   function must be in scope.
+///
+/// * `(identifier : type) <- expression`: bind expression to identifier. a `bind`
+///   function must be in scope.
+///
+/// * `(pattern) <- expression`: bind expression to pattern. a `bind`
 ///   function must be in scope.
 ///
 /// * `let pattern = expression`: assign expression to pattern, as
@@ -27,6 +33,8 @@
 ///
 /// * `when expression`: filter on the monad. `ret` and `mzero`
 ///   functions must be in scope.
+///
+/// * `expression`: any expression.
 ///
 /// # Example
 ///
@@ -39,7 +47,7 @@
 ///         ign 0..2; // duplicate each value
 ///         when x % 2 == 0; // filter on even values
 ///         let y = x + 5; // create y
-///         ret(y + 5) // return y + 5
+///         ret (y + 5) // return y + 5
 ///     }.collect::<Vec<_>>();
 ///     assert_eq!(l, vec![10, 10, 12, 12, 14, 14]);
 /// }
@@ -59,21 +67,21 @@ macro_rules! mdo {
     );
 
     (
-        $x: ident <- $e: expr ; $( $t: tt )*
-    ) => (
-        bind($e, move |$x| mdo! { $( $t )* } )
-    );
-
-    (
-        ptrn $p: pat =< $e: expr ; $( $t: tt )*
+        ( $p: pat ) <- $e: expr ; $( $t: tt )*
     ) => (
         bind($e, move |$p| mdo! { $( $t )* } )
     );
 
     (
-        $p: ident : $ty: ty =< $e: expr ; $( $t: tt )*
+        ( $p: ident : $ty: ty ) <- $e: expr ; $( $t: tt )*
     ) => (
         bind($e, move |$p : $ty| mdo! { $( $t )* } )
+    );
+
+    (
+        $x: ident <- $e: expr ; $( $t: tt )*
+    ) => (
+        bind($e, move |$x| mdo! { $( $t )* } )
     );
 
     (
@@ -89,12 +97,6 @@ macro_rules! mdo {
     );
     
     ($e : expr) => ($e);
-    
-    // (
-    //     ret $e: expr
-    // ) => (
-    //     ret ($e)
-    // )
 }
 
 pub mod option {
@@ -204,11 +206,30 @@ mod tests {
 
     #[test]
     fn let_type() {
-        use super::option::{ret};
+        use super::option::{bind, ret};
         let _: Option<i32> = mdo! {
             let i: i32 = 0;
             ret (i)
         };
+        let _: Option<i32> = mdo! {
+            (i: i32) <- ret (0);
+            ret (i)
+        };
+    }
+
+    #[test]
+    fn let_ptrn() {
+        use super::option::{bind, ret};
+        let x = mdo! {
+            ((x, _)) <- ret ((10, 20));
+            ret (x)
+        };
+        assert_eq!(x, Some (10));
+        let x = mdo! {
+            let (x, _) = (10, 20);
+            ret (x)
+        };
+        assert_eq!(x, Some (10));
     }
 
     #[test]
@@ -304,7 +325,7 @@ mod tests {
     fn mdo_doc_example() {
         use super::iter::{bind, ret, mzero};
         let l = mdo! {
-            x: i32 =< 0..5; // assign x to [0, 5[
+            (x: i32) <- 0..5; // assign x to [0, 5[
             ign 0..2; // duplicate each value
             when x % 2 == 0; // filter on even values
             let y = x + 5; // create y

@@ -1,118 +1,98 @@
+-- Imitate the following Rust code:
+-- pub fn polybind<I, U, F>(m: I, f: F) -> FlatMap<I, U, F>
+-- where I: Iterator, U: Iterator, F: FnMut(<I as Iterator>::Item) -> U {
+--     m.flat_map(f)
+-- }
+    
 {-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances, GADTs, UndecidableInstances, KindSignatures, OverlappingInstances #-}
 
-module Iterator where
+-- Iterator --
 
-    class Iterator item t where
-                next :: t -> t * Maybe item
-                
-    class Callable a b t where
-                call :: t -> a -> b
-                             call
-    data FlatMap item = FlatMap { flap_map_next :: FlatMap -> (FlatMap * Maybe item) }
-        
-        instance Iterator item (FlatMap item) where
-                next = flap_map_next
+class Iterator t item | t -> item where
+  next :: t -> Maybe (t, item)
 
-    flap_map :: cont1 -> f -> Flat
-    flap_map m f =
-        let loop (c1, c2) =
-            let (c2', o) = next c2 in
-            case o of
-              | Just v => ((c1, c2'), Just v)
-                   | Nothing =>
-                     let (c1', o) = next c1 in
-| Just v => loop (c1', f v)
-| Nothing => ((c1', c2'), Nothing)
+collect it =
+  case next it of
+  Just (it', v) -> v : collect it'
+  Nothing -> []
+  
+collect_n n it =
+  if n <= 0 then []
+  else
+    case next it of
+    Just (it', v) -> v : collect_n (n - 1) it'
+    Nothing -> []
+  
+instance Iterator [a] a where
+  next [] = Nothing
+  next (x:xs) = Just (xs, x)
 
-                                    
-        FlatMap $ \(FlapMap )
-        
-    bind :: (Iterator item1 cont1, Iterator item2 cont2, Callable item1 cont2) => cont1 -> f -> FlatMap item2
-    bind m f = flat_map m f
-               
-    pub fn bind<I, U, F>(m: I, f: F) -> FlatMap<I, U, F>
-    where I: Iterator, U: Iterator, F: FnMut(<I as Iterator>::Item) -> U {
-        m.flat_map(f)
-    }
-    
-import Control.Monad.Trans
-import Control.Monad.State
-import Control.Monad.Writer
-import Control.Monad.Identity
+instance Iterator (Maybe a) a where
+  next (Just v) = Just (Nothing, v)
+  next Nothing = Nothing
 
-newtype TagT tag m a = TagT { runTag :: m a } deriving Show
+class Inc t where
+  inc :: t -> t
 
-instance Monad m => Monad (TagT tag m) where
-   return a = TagT (return a)
-   TagT x >>= f = TagT $ x >>= (runTag . f)
+instance (Enum t) => Inc t where
+  inc = succ
 
-instance MonadTrans (TagT tag) where
-   lift m = TagT m
+instance (Ord a, Inc a) => Iterator (a, a) a where
+  next (x, y) = if x < y then Just ((inc x, y), x)
+                else Nothing
 
-instance Functor m => Functor (TagT tag m) where
-  fmap f = TagT . fmap f . runTag
+newtype Range a = Range (a, a)
 
-instance MonadState s m => MonadState s (TagT tag m) where
-  get = TagT get
-  put s = TagT $ put s
+instance (Ord a, Inc a) => Iterator (Range a) a where
+  next (Range (x, y)) = if x < y then Just (Range (inc x, y), x)
+                        else Nothing
 
--- monad transformer stack n contains monad m with tag t
-class Contains (m :: * -> *) t (n :: * -> *) | m t -> n where
-   liftFrom :: t -> n a -> m a
+-- Callable --
+  
+class Callable t a b | t -> a, t -> b where
+  call :: t -> a -> b
+  
+instance Callable (a -> b) a b where
+  call = ($)
 
-instance (Monad m, m ~ n) => Contains (TagT tag m) tag n where
-   liftFrom _ x = lift x
+newtype Closure a b = Closure (a -> b)
 
-instance (MonadTrans t, Monad m, Contains m tag n) => Contains (t m) tag n where
-   liftFrom tag x = lift (liftFrom tag x)
+instance Callable (Closure a b) a b where
+  call (Closure f) x =  f x
 
-type TStateT tag s m = TagT tag (StateT s m)
-runTStateT = runStateT . runTag
+-- polybind --
+  
+data FlatMap cont1 cont2 f = FlatMap {
+  core :: Maybe (cont1, cont2, f)
+  }
 
-tput tag x = liftFrom tag (put x)
-tget tag = liftFrom tag get
+flat_map :: (Iterator cont1 item1, Iterator cont2 item2, Callable f item1 cont2) => cont1 -> f -> FlatMap cont1 cont2 f
+flat_map m f = 
+  case next m of
+   Just (m', v) -> FlatMap $ Just (m', call f v, f)
+   Nothing -> FlatMap Nothing
 
-type TState tag s = TStateT tag s Identity
-runTState m = runIdentity . runTStateT m
+polybind :: (Iterator cont1 item1, Iterator cont2 item2, Callable f item1 cont2) => cont1 -> f -> FlatMap cont1 cont2 f
+polybind m f = flat_map m f
 
-type TWriterT tag w m = TagT tag (WriterT w m)
-runTWriterT = runWriterT . runTag
+ret v = Just v
 
-ttell tag x = liftFrom tag (tell x)
+flap_map_next :: (Iterator cont1 item1, Iterator cont2 item2, Callable f item1 cont2) => FlatMap cont1 cont2 f -> Maybe (FlatMap cont1 cont2 f, item2)
+flap_map_next (FlatMap o) = do
+  (c1, c2, f) <- o
+  case next c2 of
+   Just (c2', v) -> return (FlatMap $ Just (c1, c2', f), v)
+   Nothing -> do
+     (c1', v) <- next c1
+     flap_map_next $ FlatMap $ Just (c1', call f v, f)
 
-type TWriter tag w = TWriterT tag w Identity
-runTWriter = runIdentity . runTWriterT
+instance (Iterator cont1 item1, Iterator cont2 item2, Callable f item1 cont2) => Iterator (FlatMap cont1 cont2 f) item2 where
+  next = flap_map_next
 
--- tests
-
-test1 :: StateT Int (StateT Int (StateT Int (WriterT String Identity))) Int
-test1 = do
-   put 1
-   lift $ put 2
-   lift $ lift $ put 3
-   a <- get
-   b <- lift $ get
-   c <- lift $ lift $ get
-   lift $ lift $ lift $ tell $ show $ a+b+c
-   return $ a*b*c
-
-go1 = runIdentity (runWriterT (runStateT (runStateT (runStateT test1 0) 0) 0))
-
-data A = A
-data B = B
-data C = C
-data D = D
-
-test2 :: TStateT A Int (TStateT B Int (TStateT C Int (TWriterT D String Identity))) Int
-
-test2 = do
-   tput A 1
-   tput B 2
-   tput C 3
-   a <- tget A
-   b <- tget B
-   c <- tget C
-   ttell D $ show $ a+b+c
-   return $ a*b*c
-
-go2 = runIdentity (runTWriterT (runTStateT (runTStateT (runTStateT test2 0) 0) 0))
+-- main --
+  
+main = do
+  let it = polybind (polybind [1,2,3] (\x -> Range (x, 4))) (Closure (\y -> ret $ y + 100))
+  print $ collect it
+  let it = polybind (polybind [1,2,3] (\x -> Range (x, 1000000000000))) (Closure (\y -> ret $ y + 100))
+  print $ collect_n 10 it

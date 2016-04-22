@@ -18,9 +18,12 @@ module Iterator where
         let loop (c1, c2) =
             let (c2', o) = next c2 in
             case o of
-              Just v => ((c1, c2'), Just v)
+              | Just v => ((c1, c2'), Just v)
                    | Nothing =>
-                     let (c1', o) = next c1
+                     let (c1', o) = next c1 in
+| Just v => loop (c1', f v)
+| Nothing => ((c1', c2'), Nothing)
+
                                     
         FlatMap $ \(FlapMap )
         

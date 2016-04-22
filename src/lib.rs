@@ -275,6 +275,16 @@ mod tests {
             ret(res)
         }.collect::<Vec<_>>();
         assert_eq!(l, vec![(3, 4, 5), (6, 8, 10)]);
+        let l = mdo! {
+            z <- 1i32..11;
+            y <- (1..z).collect::<Vec<_>>().into_iter();
+            x <- 1..y + 1;
+            let test = x * x + y * y == z * z;
+            when test;
+            let res = (x, y, z);
+            ret(res)
+        }.collect::<Vec<_>>();
+        assert_eq!(l, vec![(3, 4, 5), (6, 8, 10)]);
     }
 
     #[test]

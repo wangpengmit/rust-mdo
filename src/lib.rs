@@ -17,13 +17,13 @@
 ///
 /// instr can be:
 ///
-/// * `pattern =<< expression`: bind expression to pattern. a `bind`
+/// * `pattern <- expression`: bind expression to pattern. a `bind`
 ///   function must be in scope.
 ///
 /// * `let pattern = expression`: assign expression to pattern, as
 ///   normal rust let.
 ///
-/// * `ign expression`: equivalent to `_ =<< expression`
+/// * `ign expression`: equivalent to `_ <- expression`
 ///
 /// * `when expression`: filter on the monad. `ret` and `mzero`
 ///   functions must be in scope.
@@ -35,11 +35,11 @@
 /// fn main() {
 ///     use mdo::iter::{bind, ret, mzero};
 ///     let l = mdo! {
-///         x =<< 0i32..5; // assign x to [0, 5[
+///         x <- 0i32..5; // assign x to [0, 5[
 ///         ign 0..2; // duplicate each value
 ///         when x % 2 == 0; // filter on even values
 ///         let y = x + 5; // create y
-///         ret ret(y + 5) // return y + 5
+///         ret(y + 5) // return y + 5
 ///     }.collect::<Vec<_>>();
 ///     assert_eq!(l, vec![10, 10, 12, 12, 14, 14]);
 /// }
@@ -59,13 +59,19 @@ macro_rules! mdo {
     );
 
     (
-        $p: pat =<< $e: expr ; $( $t: tt )*
+        $x: ident <- $e: expr ; $( $t: tt )*
+    ) => (
+        bind($e, move |$x| mdo! { $( $t )* } )
+    );
+
+    (
+        ptrn $p: pat =< $e: expr ; $( $t: tt )*
     ) => (
         bind($e, move |$p| mdo! { $( $t )* } )
     );
 
     (
-        $p: ident : $ty: ty =<< $e: expr ; $( $t: tt )*
+        $p: ident : $ty: ty =< $e: expr ; $( $t: tt )*
     ) => (
         bind($e, move |$p : $ty| mdo! { $( $t )* } )
     );
@@ -81,12 +87,14 @@ macro_rules! mdo {
     ) => (
         bind(if $e { ret(()) } else { mzero() }, move |_| mdo! { $( $t )* })
     );
-
-    (
-        ret $f: expr
-    ) => (
-        $f
-    )
+    
+    ($e : expr) => ($e);
+    
+    // (
+    //     ret $e: expr
+    // ) => (
+    //     ret ($e)
+    // )
 }
 
 pub mod option {
@@ -172,33 +180,34 @@ mod tests {
     fn option_mdo() {
         use super::option::{bind, ret, mzero};
         let x = mdo! {
-            ret ret(5)
+            ret(5)
         };
         assert_eq!(x, Some(5));
         let x = mdo! {
-            x =<< ret(5);
-            ret ret(x + 1)
+            x <- ret(5);
+            ret (x + 1)
         };
         assert_eq!(x, Some(6));
         let x = mdo! {
-            x =<< ret(5);
-            x =<< ret(x + 5);
-            ret ret(x * 2)
+            x <- ret(5);
+            x <- ret(x + 5);
+            ret(x * 2)
         };
         assert_eq!(x, Some(20));
         let x = mdo! {
-            x =<< ret(5i32);
+            x <- ret(5i32);
             when x == 0;
-            ret ret(x * 2)
+            ret(x * 2)
         };
         assert_eq!(x, None);
     }
 
     #[test]
     fn let_type() {
-        let _: i32 = mdo! {
+        use super::option::{ret};
+        let _: Option<i32> = mdo! {
             let i: i32 = 0;
-            ret i
+            ret (i)
         };
     }
 
@@ -224,24 +233,25 @@ mod tests {
     fn iter_mdo() {
         use super::iter::{bind, ret, mzero};
         let l = mdo! {
-            x =<< 0..3;
-            ret x..3
+            x <- 0..3;
+            y <- x..3;
+            ret (y)
         }.collect::<Vec<_>>();
         assert_eq!(l, vec![0, 1, 2, 1, 2, 2]);
         let l = mdo! {
-            x =<< 0i32..3;
-            y =<< 0..3;
-            ret ret(x + y)
+            x <- 0i32..3;
+            y <- 0..3;
+            ret(x + y)
         }.collect::<Vec<_>>();
         assert_eq!(l, vec![0, 1, 2, 1, 2, 3, 2, 3, 4]);
         let l = mdo! {
-            z =<< 1i32..11;
-            y =<< 1..z;
-            x =<< 1..y + 1;
+            z <- 1i32..11;
+            y <- 1..z;
+            x <- 1..y + 1;
             let test = x * x + y * y == z * z;
             when test;
             let res = (x, y, z);
-            ret ret(res)
+            ret(res)
         }.collect::<Vec<_>>();
         assert_eq!(l, vec![(3, 4, 5), (6, 8, 10)]);
     }
@@ -250,19 +260,20 @@ mod tests {
     fn iter_ignore() {
         use super::iter::{bind, ret};
         let l = mdo! {
-            x =<< 0i32..5;
+            x <- 0i32..5;
             ign 0..2;
-            ret ret(x)
+            ret(x)
         }.collect::<Vec<_>>();
         assert_eq!(l, vec![0, 0, 1, 1, 2, 2, 3, 3, 4, 4]);
     }
 
     #[test]
     fn ret_trick() {
-        use super::iter::bind;
+        use super::iter::{bind, ret};
         let l = mdo! {
-            ret =<< 0..5;
-            ret 0..ret
+            x <- 0..5;
+            y <- 0..x;
+            ret (y)
         }.collect::<Vec<_>>();
         assert_eq!(l, vec![0, 0, 1, 0, 1, 2, 0, 1, 2, 3]);
     }
@@ -271,9 +282,9 @@ mod tests {
     fn when_trick() {
         use super::iter::{bind, ret, mzero};
         let l = mdo! {
-            when =<< 0i32..5;
+            when <- 0i32..5;
             when when != 3;
-            ret ret(when)
+            ret(when)
         }.collect::<Vec<_>>();
         assert_eq!(l, vec![0, 1, 2, 4]);
     }
@@ -282,9 +293,9 @@ mod tests {
     fn ign_trick() {
         use super::iter::{bind, ret};
         let l = mdo! {
-            ign =<< 0i32..5;
+            ign <- 0i32..5;
             ign 0..0;
-            ret ret(ign)
+            ret(ign)
         }.collect::<Vec<_>>();
         assert_eq!(l, vec![]);
     }
@@ -293,11 +304,11 @@ mod tests {
     fn mdo_doc_example() {
         use super::iter::{bind, ret, mzero};
         let l = mdo! {
-            x: i32 =<< 0..5; // assign x to [0, 5[
+            x: i32 =< 0..5; // assign x to [0, 5[
             ign 0..2; // duplicate each value
             when x % 2 == 0; // filter on even values
             let y = x + 5; // create y
-            ret ret(y + 5) // return y + 5
+            ret(y + 5) // return y + 5
         }.collect::<Vec<_>>();
         assert_eq!(l, vec![10, 10, 12, 12, 14, 14]);
     }

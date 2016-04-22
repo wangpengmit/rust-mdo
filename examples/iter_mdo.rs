@@ -21,17 +21,17 @@ fn main() {
                            bind(if x * x + y * y == z * z { ret(()) }
                                 else { mzero() },
                                 move |_|
-                                ret((x, y, z))
+                                ret((x+2, y, z))
                                 )))).collect::<Vec<_>>();
     println!("{:?}", l);
 
     // the same thing, using the mdo! macro
     let l = mdo! {
-        z =<< 1i32..11;
-        x =<< 1..z;
-        y =<< x..z;
+        z <- 1i32..11;
+        x <- 1..z;
+        y <- x..z;
         when x * x + y * y == z * z;
-        ret ret((x, y, z))
+        ret ((x+2, y, z))
     }.collect::<Vec<_>>();
     println!("{:?}", l);
 }
